@@ -144,7 +144,8 @@ local function dumpDiagnostics()
                     end
                 end
             end
-        end\n        if not any then lines[#lines + 1] = "No InventoryComponent_C instances found; load into a save first." end
+        end
+        if not any then lines[#lines + 1] = "No InventoryComponent_C instances found; load into a save first." end
         for k, v in pairs(propCache) do lines[#lines + 1] = string.format("cached %s -> %s", k, v) end
         for _, l in ipairs(lines) do log("%s", l) end
         local f = io.open(DUMP_FILE, "w")
