@@ -9,9 +9,10 @@ local DUMP_FILE = "IncrementalWeight_dump.txt"
 
 -- Verified from the UE4SS object dump (Medieval Dynasty 2.7.4.0): the player's inventory is an
 -- InventoryComponent_C with PlayerCharacter == true. Its carry limit fields are the *OverloadWeight
--- floats. FinalOverloadWeight is the primary candidate; confirm with F8 before/after the Mule skill.
+-- floats. Runtime F8 dump of the player inventory: InitialOverloadWeight=35 (matches the HUD limit),
+-- FinalOverloadWeight=0, so InitialOverloadWeight is the capacity field.
 local CLASS_CANDIDATES = { "InventoryComponent_C" }
-local PROPERTY_CANDIDATES = { "FinalOverloadWeight" }
+local PROPERTY_CANDIDATES = { "InitialOverloadWeight" }
 -- Floats shown by F8 so the Mule skill (+5 kg/level) can be matched to the right field.
 local DIAG_PROPERTIES = {
     "InitialOverloadWeight", "FinalOverloadWeight", "BaseInitialOverloadWeight",
