@@ -1,5 +1,5 @@
 -- IncrementalWeight: adjust max carry weight at runtime (UE4SS v3.0.1).
--- F5: -10 kg   F6: +10 kg   F7: diagnostics dump
+-- F6: -10 kg   F7: +10 kg   F8: diagnostics dump (F5 is the game autosave key)
 local MOD_NAME = "IncrementalWeight"
 local STEP = 10.0
 local MIN_OFFSET = -500.0
@@ -149,7 +149,7 @@ local function changeOffset(delta)
         local new = math.min(MAX_OFFSET, math.max(MIN_OFFSET, offset + delta))
         offset = new
         local n = applyAll("keybind")
-        if n == 0 then log("Offset now %+.1f kg but no target updated (run F7)", offset) end
+        if n == 0 then log("Offset now %+.1f kg but no target updated (run F8)", offset) end
     end)
 end
 
@@ -195,9 +195,9 @@ local function register(key, fn, label)
     if not ok then log("RegisterKeyBind %s failed: %s", label, tostring(err)) end
 end
 
-register(Key.F5, function() changeOffset(-STEP) end, "F5")
-register(Key.F6, function() changeOffset(STEP) end, "F6")
-register(Key.F7, dumpDiagnostics, "F7")
+register(Key.F6, function() changeOffset(-STEP) end, "F6")
+register(Key.F7, function() changeOffset(STEP) end, "F7")
+register(Key.F8, dumpDiagnostics, "F8")
 
 -- Persistence: periodic re-apply covers save loads, backpack changes, perks, respawns and
 -- fast travel without depending on unverified hook paths.
@@ -211,4 +211,4 @@ LoopAsync(REAPPLY_MS, function()
     return false
 end)
 
-log("Loaded. F5 -%d kg, F6 +%d kg, F7 diagnostics.", STEP, STEP)
+log("Loaded. F6 -%d kg, F7 +%d kg, F8 diagnostics.", STEP, STEP)

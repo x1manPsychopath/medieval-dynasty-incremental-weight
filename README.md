@@ -4,9 +4,9 @@ UE4SS Lua mod for Medieval Dynasty that adds configurable incremental carry-weig
 ## Controls
 | Key | Action |
 |-----|--------|
-| F5 | Decrease max carry weight by 10 kg |
-| F6 | Increase max carry weight by 10 kg |
-| F7 | Diagnostics (log + `IncrementalWeight_dump.txt`) |
+| F6 | Decrease max carry weight by 10 kg |
+| F7 | Increase max carry weight by 10 kg |
+| F8 | Diagnostics (log + `IncrementalWeight_dump.txt`) |
 
 ## Install
 Requires UE4SS v3.0.1. Run `./deploy.ps1 [-Target Auto|Steam|GamePass] [-GamePath <dir>] [-DryRun] [-Verbose]`.
