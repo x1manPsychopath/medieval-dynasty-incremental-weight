@@ -10,7 +10,7 @@ UE4SS Lua mod for Medieval Dynasty that adds configurable incremental carry-weig
 
 ## Install
 Requires UE4SS v3.0.1. Run `./deploy.ps1 [-Target Auto|Steam|GamePass] [-GamePath <dir>] [-DryRun] [-Verbose]`.
-The mod is copied to `...\Binaries\WinGDK\Mods\IncrementalWeight` (Game Pass) or `...\Binaries\Win64\Mods\IncrementalWeight` (Steam).
+The mod is copied to `...\Binaries\WinGDK\ue4ss\Mods\IncrementalWeight` (Game Pass) or `...\Binaries\Win64\ue4ss\Mods\IncrementalWeight` (Steam), then verified by SHA-256. See `docs/DeploymentVerification.md`.
 `enabled.txt` enables it; alternatively add `IncrementalWeight : 1` to `mods.txt` (see `src/IncrementalWeight/mods.txt.template`).
 
 ## Docs
