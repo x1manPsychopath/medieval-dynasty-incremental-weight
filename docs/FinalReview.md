@@ -6,6 +6,12 @@ Reviewed every tracked repository file: both GitHub Actions workflows, `deploy.p
 
 One confirmed diagnostics defect was fixed in this review: the periodic re-apply callback caught errors from `applyAll` and discarded them. It now writes the exception to the UE4SS log. No feature behavior or deployment logic was otherwise changed. The repository is ready for controlled in-game testing, but the game-dependent assumptions below remain unverified.
 
+## Completed / Verified / Pending
+
+- **Completed:** Reviewed the tracked repository, fixed periodic re-apply error logging, and added this report. A pull request is open.
+- **Verified:** Both GitHub Actions workflows pass. PowerShell parsing, `git diff --check`, and temporary Steam/Win64 plus Game Pass/WinGDK dry-run and copy/hash checks passed.
+- **Pending:** In-game verification remains necessary; follow the manual test list below. Lua tools were unavailable locally, so Lua syntax and lint were validated by the passing CI workflow.
+
 ## Confirmed issues
 
 | Finding | Status | Detail |
@@ -32,6 +38,7 @@ No confirmed Lua syntax error, invalid use of the reviewed core UE4SS APIs, work
 - `deploy.ps1` resolves source files relative to `$PSScriptRoot`; the Steam and Game Pass candidate roots map to `Win64` and `WinGDK` respectively. `Find-Binaries` searches the expected Unreal `Binaries\<platform>` directory to depth 3. Explicit `-GamePath` scans that root; `-Target` restricts the platform as expected.
 - PowerShell's parser accepted `deploy.ps1`. Temporary Steam/Win64 and Game Pass/WinGDK fixtures passed `-DryRun` and real deployment; both destination payloads contained `main.lua` and `enabled.txt`, and both `main.lua` hashes matched the source. These checks do not validate a real installation, permissions, or a live UE4SS runtime.
 - The core APIs and signatures reviewed against UE4SS documentation include `RegisterKeyBind`, `ExecuteInGameThread`, `LoopAsync`, and `UStruct:ForEachProperty`/`GetSuperStruct`. `LoopAsync` returns `false` to continue and `true` to stop, consistent with the code. The online documentation is not pinned to the exact UE4SS v3.0.1 package; confirm against the installed build if behavior differs.
+- Both GitHub Actions workflows passed on the pull request, including Lua syntax/lint and repository/PowerShell validation.
 
 ## Runtime assumptions
 
@@ -54,9 +61,8 @@ No confirmed Lua syntax error, invalid use of the reviewed core UE4SS APIs, work
 
 ## Recommended next actions
 
-1. Run both GitHub Actions workflows on the pull request; Lua tools were not available in the local Windows environment during this review.
-2. Complete the manual checks above, especially validating the detected property before exercising repeated writes.
-3. If standard Steam auto-detection must support custom libraries, add detection for Steam's configured library folders rather than relying only on `ProgramFiles`.
+1. Complete the manual checks above, especially validating the detected property before exercising repeated writes.
+2. If standard Steam auto-detection must support custom libraries, add detection for Steam's configured library folders rather than relying only on `ProgramFiles`.
 
 ## References
 
