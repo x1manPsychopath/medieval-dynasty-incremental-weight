@@ -1,5 +1,5 @@
 -- IncrementalWeight: adjust max carry weight at runtime (UE4SS v3.0.1).
--- F5: -10 kg   F6: +10 kg   F7: diagnostics dump
+-- F6: -10 kg   F7: +10 kg   F8: diagnostics dump (F5 is the game autosave key)
 local MOD_NAME = "IncrementalWeight"
 local STEP = 10.0
 local MIN_OFFSET = -500.0
@@ -7,27 +7,22 @@ local MAX_OFFSET = 5000.0
 local REAPPLY_MS = 2000
 local DUMP_FILE = "IncrementalWeight_dump.txt"
 
--- Candidate owner classes (short names; not all may exist in a given game build).
-local CLASS_CANDIDATES = {
-    "BP_PlayerCharacter_C", "PlayerCharacter", "BP_Player_C", "BP_MDPlayerCharacter_C",
-    "InventoryComponent", "BP_InventoryComponent_C", "PlayerInventoryComponent",
-    "BP_PlayerInventory_C", "CharacterInventoryComponent",
+-- Verified from the UE4SS object dump (Medieval Dynasty 2.7.4.0): the player's inventory is an
+-- InventoryComponent_C with PlayerCharacter == true. Its carry limit fields are the *OverloadWeight
+-- floats. Runtime F8 dump of the player inventory: InitialOverloadWeight=35 (matches the HUD limit),
+-- FinalOverloadWeight=0 at first load, 50 later.
+local CLASS_CANDIDATES = { "InventoryComponent_C" }
+-- Initial = HUD limit / slowdown threshold (confirmed: HUD moved 35 -> 65). Final = 50 on the player and is
+-- probably the hard cap, so both receive the offset (unconfirmed for Final; verify by carrying > 50 kg).
+local PROPERTY_CANDIDATES = { "InitialOverloadWeight", "FinalOverloadWeight" }
+-- Floats shown by F8 so the Mule skill (+5 kg/level) can be matched to the right field.
+local DIAG_PROPERTIES = {
+    "InitialOverloadWeight", "FinalOverloadWeight", "BaseInitialOverloadWeight",
+    "BaseFinalOverloadWeight", "CurrentTotalWeightOfInventory",
 }
-
--- Candidate property names, in priority order.
-local PROPERTY_CANDIDATES = {
-    "MaxCarryWeight", "MaxWeight", "MaxInventoryWeight", "MaxCarryingWeight",
-    "CarryWeightMax", "WeightLimit", "MaxLoad", "CarryCapacity", "MaxCapacity",
-    "CarryWeight", "InventoryMaxWeight",
-}
-
--- Keywords for reflection fallback scan (lower-case, matched against property names).
-local SCAN_KEYWORDS = { "weight", "carry", "capacity", "load" }
-local SCAN_EXCLUDE = { "current", "total", "used", "min", "bone", "cloth", "animation" }
 
 local offset = 0.0
-local state = {}      -- [objectKey] = { base = number, written = number }
-local propCache = {}  -- [className] = property name
+local state = {}      -- [objectKey#property] = { base = number, written = number }
 
 local function log(fmt, ...)
     local ok, msg = pcall(string.format, fmt, ...)
@@ -56,48 +51,10 @@ local function writeNumber(obj, prop, value)
     return ok
 end
 
--- Reflection fallback: returns list of numeric property names matching keywords.
-local function scanProperties(obj)
-    local found = {}
-    local ok, err = pcall(function()
-        local cls = obj:GetClass()
-        while cls ~= nil and isValid(cls) do
-            cls:ForEachProperty(function(p)
-                local okn, name = pcall(function() return p:GetFName():ToString() end)
-                if okn and type(name) == "string" then
-                    local l = name:lower()
-                    local hit, bad = false, false
-                    for _, k in ipairs(SCAN_KEYWORDS) do if l:find(k, 1, true) then hit = true end end
-                    for _, k in ipairs(SCAN_EXCLUDE) do if l:find(k, 1, true) then bad = true end end
-                    if hit and not bad and readNumber(obj, name) ~= nil then found[#found + 1] = name end
-                end
-            end)
-            local okp, parent = pcall(function() return cls:GetSuperStruct() end)
-            if not okp then break end
-            cls = parent
-        end
-    end)
-    if not ok then log("scanProperties error: %s", tostring(err)) end
-    return found
-end
-
-local function detectProperty(obj, className)
-    local cached = propCache[className]
-    if cached and readNumber(obj, cached) ~= nil then return cached end
-    for _, name in ipairs(PROPERTY_CANDIDATES) do
-        if readNumber(obj, name) ~= nil then
-            propCache[className] = name
-            log("Detected weight property '%s' on %s", name, className)
-            return name
-        end
-    end
-    local scanned = scanProperties(obj)
-    if #scanned > 0 then
-        propCache[className] = scanned[1]
-        log("Reflection fallback chose '%s' on %s (%d candidates; run F7)", scanned[1], className, #scanned)
-        return scanned[1]
-    end
-    return nil
+-- NPC/animal/storage inventories share the class; only the player's has PlayerCharacter == true.
+local function isPlayerInventory(obj)
+    local ok, v = pcall(function() return obj.PlayerCharacter end)
+    return ok and v == true
 end
 
 local function collectTargets()
@@ -106,7 +63,7 @@ local function collectTargets()
         local ok, list = pcall(FindAllOf, className)
         if ok and type(list) == "table" then
             for _, obj in ipairs(list) do
-                if isValid(obj) then targets[#targets + 1] = { obj = obj, class = className } end
+                if isValid(obj) and isPlayerInventory(obj) then targets[#targets + 1] = { obj = obj, class = className } end
             end
         end
     end
@@ -117,12 +74,13 @@ end
 -- (backpack swap, perk, load, respawn, recalculation) the new value becomes the baseline.
 local function applyAll(reason)
     local applied = 0
+    local changed = {}
     for _, t in ipairs(collectTargets()) do
-        local prop = detectProperty(t.obj, t.class)
-        if prop then
-            local key = safeName(t.obj)
+        for _, prop in ipairs(PROPERTY_CANDIDATES) do
+            local key = safeName(t.obj) .. "#" .. prop
             local cur = readNumber(t.obj, prop)
-            if cur ~= nil then
+            -- A zero value means the game has not initialised the field yet; never raise it from 0.
+            if cur ~= nil and (cur > 0 or state[key] ~= nil) then
                 local s = state[key]
                 if s == nil or math.abs(cur - s.written) > 0.001 then
                     s = { base = cur, written = cur }
@@ -133,6 +91,7 @@ local function applyAll(reason)
                     if writeNumber(t.obj, prop, target) then
                         s.written = target
                         applied = applied + 1
+                        changed[t.obj] = true
                     else
                         log("Failed to write %s on %s", prop, key)
                     end
@@ -140,7 +99,13 @@ local function applyAll(reason)
             end
         end
     end
-    if applied > 0 then log("Applied offset %+.1f kg to %d object(s) (%s)", offset, applied, reason) end
+    -- Runtime test: the game only re-evaluates the "overloaded" (immobile) state when inventory weight is
+    -- recalculated, so a raised limit did not free the player until an item was added. Trigger that recalc.
+    for obj in pairs(changed) do
+        local ok, err = pcall(function() obj:UpdateTotalWeightOfInventory_BPI() end)
+        if not ok then log("UpdateTotalWeightOfInventory_BPI failed: %s", tostring(err)) end
+    end
+    if applied > 0 then log("Applied offset %+.1f kg to %d value(s) (%s)", offset, applied, reason) end
     return applied
 end
 
@@ -149,7 +114,7 @@ local function changeOffset(delta)
         local new = math.min(MAX_OFFSET, math.max(MIN_OFFSET, offset + delta))
         offset = new
         local n = applyAll("keybind")
-        if n == 0 then log("Offset now %+.1f kg but no target updated (run F7)", offset) end
+        if n == 0 then log("Offset now %+.1f kg but no target updated (run F8)", offset) end
     end)
 end
 
@@ -162,22 +127,21 @@ local function dumpDiagnostics()
             local count = (ok and type(list) == "table") and #list or 0
             lines[#lines + 1] = string.format("class %s: %d instance(s)", className, count)
             if count > 0 then
-                any = true
-                local obj = list[1]
-                if isValid(obj) then
-                    lines[#lines + 1] = "  sample: " .. safeName(obj)
-                    for _, name in ipairs(PROPERTY_CANDIDATES) do
-                        local v = readNumber(obj, name)
-                        if v ~= nil then lines[#lines + 1] = string.format("  candidate %s = %s", name, tostring(v)) end
-                    end
-                    for _, name in ipairs(scanProperties(obj)) do
-                        lines[#lines + 1] = string.format("  scan %s = %s", name, tostring(readNumber(obj, name)))
+                for i, obj in ipairs(list) do
+                    if isValid(obj) then
+                        any = true
+                        local ok2, pc = pcall(function() return obj.PlayerCharacter end)
+                        local parts = {}
+                        for _, name in ipairs(DIAG_PROPERTIES) do
+                            parts[#parts + 1] = string.format("%s=%s", name, tostring(readNumber(obj, name)))
+                        end
+                        lines[#lines + 1] = string.format("  [%d] player=%s %s | %s", i,
+                            tostring(ok2 and pc), table.concat(parts, " "), safeName(obj))
                     end
                 end
             end
         end
-        if not any then lines[#lines + 1] = "No candidate class instances found; load into a save first." end
-        for k, v in pairs(propCache) do lines[#lines + 1] = string.format("cached %s -> %s", k, v) end
+        if not any then lines[#lines + 1] = "No InventoryComponent_C instances found; load into a save first." end
         for _, l in ipairs(lines) do log("%s", l) end
         local f = io.open(DUMP_FILE, "w")
         if f then
@@ -195,9 +159,9 @@ local function register(key, fn, label)
     if not ok then log("RegisterKeyBind %s failed: %s", label, tostring(err)) end
 end
 
-register(Key.F5, function() changeOffset(-STEP) end, "F5")
-register(Key.F6, function() changeOffset(STEP) end, "F6")
-register(Key.F7, dumpDiagnostics, "F7")
+register(Key.F6, function() changeOffset(-STEP) end, "F6")
+register(Key.F7, function() changeOffset(STEP) end, "F7")
+register(Key.F8, dumpDiagnostics, "F8")
 
 -- Persistence: periodic re-apply covers save loads, backpack changes, perks, respawns and
 -- fast travel without depending on unverified hook paths.
@@ -211,4 +175,4 @@ LoopAsync(REAPPLY_MS, function()
     return false
 end)
 
-log("Loaded. F5 -%d kg, F6 +%d kg, F7 diagnostics.", STEP, STEP)
+log("Loaded. F6 -%d kg, F7 +%d kg, F8 diagnostics.", STEP, STEP)
