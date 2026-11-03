@@ -426,3 +426,10 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# Project specific
+*.log
+IncrementalWeight_dump*.txt
+state.txt
+.vscode/
+.luarocks/
