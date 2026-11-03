@@ -74,6 +74,7 @@ end
 -- (backpack swap, perk, load, respawn, recalculation) the new value becomes the baseline.
 local function applyAll(reason)
     local applied = 0
+    local changed = {}
     for _, t in ipairs(collectTargets()) do
         for _, prop in ipairs(PROPERTY_CANDIDATES) do
             local key = safeName(t.obj) .. "#" .. prop
@@ -90,12 +91,19 @@ local function applyAll(reason)
                     if writeNumber(t.obj, prop, target) then
                         s.written = target
                         applied = applied + 1
+                        changed[t.obj] = true
                     else
                         log("Failed to write %s on %s", prop, key)
                     end
                 end
             end
         end
+    end
+    -- Runtime test: the game only re-evaluates the "overloaded" (immobile) state when inventory weight is
+    -- recalculated, so a raised limit did not free the player until an item was added. Trigger that recalc.
+    for obj in pairs(changed) do
+        local ok, err = pcall(function() obj:UpdateTotalWeightOfInventory_BPI() end)
+        if not ok then log("UpdateTotalWeightOfInventory_BPI failed: %s", tostring(err)) end
     end
     if applied > 0 then log("Applied offset %+.1f kg to %d value(s) (%s)", offset, applied, reason) end
     return applied

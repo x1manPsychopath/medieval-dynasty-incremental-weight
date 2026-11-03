@@ -81,6 +81,10 @@ Run `pwsh .\deploy.ps1 -Target GamePass` (add `-DryRun` first to preview). Full 
 
 Hash changes whenever `main.lua` changes; re-run `deploy.ps1` and use the hash it prints. Then confirm `mods.txt` has `IncrementalWeight : 1` (it does), start the game and look for the log line `Loaded. F6 -10 kg, F7 +10 kg, F8 diagnostics.`. If the old `waiting for BP_MasterCharacter_C` line appears, the old file is still loaded.
 
+## Runtime finding (F8 dump, run 4) - CONFIRMED
+
+With offset applied to Initial + Final, the user confirmed both the HUD limit and the real carry capacity increased. Remaining defect: when already overloaded (character immobile, weight text red) and the limit is then raised above the carried weight, the character stays immobile until another item is added, so the game re-evaluates overload only on inventory weight recalculation. Fix: after a successful write, call `UpdateTotalWeightOfInventory_BPI()` (no parameters, per the object dump) on the player inventory inside `pcall`. Unconfirmed: retest overloaded -> F7 -> should be able to move without adding an item. If not, the next candidates are `SetFinalOverloadWeight_BPI(newValue)` (fires `OnFinalOverloadWeightChange`) or `UpdateWeightOnAdd`.
+
 ## Runtime finding (F8 dump, run 3)
 
 After retargeting to Initial: log shows `Applied offset +10.0`, later +30 → player `InitialOverloadWeight=65.0` (35+30), `BaseInitialOverloadWeight=35`, `FinalOverloadWeight=50`, `BaseFinal=50`. **The write works and the HUD limit moved**, but the user judged the real carry behaviour unchanged. Hypothesis: Initial is the display/slowdown threshold and Final (50) is the hard cap (it was 0 in the earlier dump, i.e. initialised lazily). Change: offset now applies to both Initial and Final (per-property baselines; a field at 0 is never raised). Unconfirmed: verify by carrying >35 kg and >50 kg with +30 applied (slowdown? pickup blocked?). Also noted: below −35 kg the clamp at 0 makes the log say "no target updated" (harmless).
