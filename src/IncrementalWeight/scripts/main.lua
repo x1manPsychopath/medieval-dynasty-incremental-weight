@@ -203,7 +203,10 @@ register(Key.F7, dumpDiagnostics, "F7")
 -- fast travel without depending on unverified hook paths.
 LoopAsync(REAPPLY_MS, function()
     if offset ~= 0 then
-        ExecuteInGameThread(function() pcall(applyAll, "loop") end)
+        ExecuteInGameThread(function()
+            local ok, err = pcall(applyAll, "loop")
+            if not ok then log("Periodic re-apply failed: %s", tostring(err)) end
+        end)
     end
     return false
 end)
