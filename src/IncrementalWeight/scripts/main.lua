@@ -7,23 +7,16 @@ local MAX_OFFSET = 5000.0
 local REAPPLY_MS = 2000
 local DUMP_FILE = "IncrementalWeight_dump.txt"
 
--- Candidate owner classes (short names; not all may exist in a given game build).
-local CLASS_CANDIDATES = {
-    "BP_PlayerCharacter_C", "PlayerCharacter", "BP_Player_C", "BP_MDPlayerCharacter_C",
-    "InventoryComponent", "BP_InventoryComponent_C", "PlayerInventoryComponent",
-    "BP_PlayerInventory_C", "CharacterInventoryComponent",
+-- Verified from the UE4SS object dump (Medieval Dynasty 2.7.4.0): the player's inventory is an
+-- InventoryComponent_C with PlayerCharacter == true. Its carry limit fields are the *OverloadWeight
+-- floats. FinalOverloadWeight is the primary candidate; confirm with F8 before/after the Mule skill.
+local CLASS_CANDIDATES = { "InventoryComponent_C" }
+local PROPERTY_CANDIDATES = { "FinalOverloadWeight" }
+-- Floats shown by F8 so the Mule skill (+5 kg/level) can be matched to the right field.
+local DIAG_PROPERTIES = {
+    "InitialOverloadWeight", "FinalOverloadWeight", "BaseInitialOverloadWeight",
+    "BaseFinalOverloadWeight", "CurrentTotalWeightOfInventory",
 }
-
--- Candidate property names, in priority order.
-local PROPERTY_CANDIDATES = {
-    "MaxCarryWeight", "MaxWeight", "MaxInventoryWeight", "MaxCarryingWeight",
-    "CarryWeightMax", "WeightLimit", "MaxLoad", "CarryCapacity", "MaxCapacity",
-    "CarryWeight", "InventoryMaxWeight",
-}
-
--- Keywords for reflection fallback scan (lower-case, matched against property names).
-local SCAN_KEYWORDS = { "weight", "carry", "capacity", "load" }
-local SCAN_EXCLUDE = { "current", "total", "used", "min", "bone", "cloth", "animation" }
 
 local offset = 0.0
 local state = {}      -- [objectKey] = { base = number, written = number }
@@ -56,31 +49,6 @@ local function writeNumber(obj, prop, value)
     return ok
 end
 
--- Reflection fallback: returns list of numeric property names matching keywords.
-local function scanProperties(obj)
-    local found = {}
-    local ok, err = pcall(function()
-        local cls = obj:GetClass()
-        while cls ~= nil and isValid(cls) do
-            cls:ForEachProperty(function(p)
-                local okn, name = pcall(function() return p:GetFName():ToString() end)
-                if okn and type(name) == "string" then
-                    local l = name:lower()
-                    local hit, bad = false, false
-                    for _, k in ipairs(SCAN_KEYWORDS) do if l:find(k, 1, true) then hit = true end end
-                    for _, k in ipairs(SCAN_EXCLUDE) do if l:find(k, 1, true) then bad = true end end
-                    if hit and not bad and readNumber(obj, name) ~= nil then found[#found + 1] = name end
-                end
-            end)
-            local okp, parent = pcall(function() return cls:GetSuperStruct() end)
-            if not okp then break end
-            cls = parent
-        end
-    end)
-    if not ok then log("scanProperties error: %s", tostring(err)) end
-    return found
-end
-
 local function detectProperty(obj, className)
     local cached = propCache[className]
     if cached and readNumber(obj, cached) ~= nil then return cached end
@@ -91,13 +59,14 @@ local function detectProperty(obj, className)
             return name
         end
     end
-    local scanned = scanProperties(obj)
-    if #scanned > 0 then
-        propCache[className] = scanned[1]
-        log("Reflection fallback chose '%s' on %s (%d candidates; run F7)", scanned[1], className, #scanned)
-        return scanned[1]
-    end
+    log("None of the expected properties are readable on %s; run F8", className)
     return nil
+end
+
+-- NPC/animal/storage inventories share the class; only the player's has PlayerCharacter == true.
+local function isPlayerInventory(obj)
+    local ok, v = pcall(function() return obj.PlayerCharacter end)
+    return ok and v == true
 end
 
 local function collectTargets()
@@ -106,7 +75,7 @@ local function collectTargets()
         local ok, list = pcall(FindAllOf, className)
         if ok and type(list) == "table" then
             for _, obj in ipairs(list) do
-                if isValid(obj) then targets[#targets + 1] = { obj = obj, class = className } end
+                if isValid(obj) and isPlayerInventory(obj) then targets[#targets + 1] = { obj = obj, class = className } end
             end
         end
     end
@@ -162,21 +131,20 @@ local function dumpDiagnostics()
             local count = (ok and type(list) == "table") and #list or 0
             lines[#lines + 1] = string.format("class %s: %d instance(s)", className, count)
             if count > 0 then
-                any = true
-                local obj = list[1]
-                if isValid(obj) then
-                    lines[#lines + 1] = "  sample: " .. safeName(obj)
-                    for _, name in ipairs(PROPERTY_CANDIDATES) do
-                        local v = readNumber(obj, name)
-                        if v ~= nil then lines[#lines + 1] = string.format("  candidate %s = %s", name, tostring(v)) end
-                    end
-                    for _, name in ipairs(scanProperties(obj)) do
-                        lines[#lines + 1] = string.format("  scan %s = %s", name, tostring(readNumber(obj, name)))
+                for i, obj in ipairs(list) do
+                    if isValid(obj) then
+                        any = true
+                        local ok2, pc = pcall(function() return obj.PlayerCharacter end)
+                        local parts = {}
+                        for _, name in ipairs(DIAG_PROPERTIES) do
+                            parts[#parts + 1] = string.format("%s=%s", name, tostring(readNumber(obj, name)))
+                        end
+                        lines[#lines + 1] = string.format("  [%d] player=%s %s | %s", i,
+                            tostring(ok2 and pc), table.concat(parts, " "), safeName(obj))
                     end
                 end
             end
-        end
-        if not any then lines[#lines + 1] = "No candidate class instances found; load into a save first." end
+        end\n        if not any then lines[#lines + 1] = "No InventoryComponent_C instances found; load into a save first." end
         for k, v in pairs(propCache) do lines[#lines + 1] = string.format("cached %s -> %s", k, v) end
         for _, l in ipairs(lines) do log("%s", l) end
         local f = io.open(DUMP_FILE, "w")
