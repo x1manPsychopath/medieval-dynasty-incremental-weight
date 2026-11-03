@@ -81,6 +81,10 @@ Run `pwsh .\deploy.ps1 -Target GamePass` (add `-DryRun` first to preview). Full 
 
 Hash changes whenever `main.lua` changes; re-run `deploy.ps1` and use the hash it prints. Then confirm `mods.txt` has `IncrementalWeight : 1` (it does), start the game and look for the log line `Loaded. F6 -10 kg, F7 +10 kg, F8 diagnostics.`. If the old `waiting for BP_MasterCharacter_C` line appears, the old file is still loaded.
 
+## Runtime finding (F8 dump, run 3)
+
+After retargeting to Initial: log shows `Applied offset +10.0`, later +30 → player `InitialOverloadWeight=65.0` (35+30), `BaseInitialOverloadWeight=35`, `FinalOverloadWeight=50`, `BaseFinal=50`. **The write works and the HUD limit moved**, but the user judged the real carry behaviour unchanged. Hypothesis: Initial is the display/slowdown threshold and Final (50) is the hard cap (it was 0 in the earlier dump, i.e. initialised lazily). Change: offset now applies to both Initial and Final (per-property baselines; a field at 0 is never raised). Unconfirmed: verify by carrying >35 kg and >50 kg with +30 applied (slowdown? pickup blocked?). Also noted: below −35 kg the clamp at 0 makes the log say "no target updated" (harmless).
+
 ## Runtime finding (F8 dump, run 2)
 
 Player inventory (`BP_PlayerCharacter_C...InventoryComponent`, `player=true`): `InitialOverloadWeight=35.0`, `FinalOverloadWeight=0.0`, `BaseInitialOverloadWeight=35.0`, `BaseFinalOverloadWeight=50.0`, `CurrentTotal=7.06`. The HUD limit is 35 kg, so **`InitialOverloadWeight` is the capacity**. `FinalOverloadWeight` was 0 on the player, so baseline 0 + (-100) clamped to 0 and no visible change resulted. The static-dump inference that Final was the capacity was wrong (chests/storage use Final; the player uses Initial). Fix: `PROPERTY_CANDIDATES = { "InitialOverloadWeight" }`; deployed SHA-256 `A3B30CDC...3E6C5A`. Needs in-game retest (F7 should raise the HUD limit above 35 kg). Unknown: whether `BaseInitialOverloadWeight` makes the game overwrite Initial on recalculation (the 2 s re-apply loop handles that).

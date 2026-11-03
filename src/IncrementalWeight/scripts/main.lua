@@ -10,9 +10,11 @@ local DUMP_FILE = "IncrementalWeight_dump.txt"
 -- Verified from the UE4SS object dump (Medieval Dynasty 2.7.4.0): the player's inventory is an
 -- InventoryComponent_C with PlayerCharacter == true. Its carry limit fields are the *OverloadWeight
 -- floats. Runtime F8 dump of the player inventory: InitialOverloadWeight=35 (matches the HUD limit),
--- FinalOverloadWeight=0, so InitialOverloadWeight is the capacity field.
+-- FinalOverloadWeight=0 at first load, 50 later.
 local CLASS_CANDIDATES = { "InventoryComponent_C" }
-local PROPERTY_CANDIDATES = { "InitialOverloadWeight" }
+-- Initial = HUD limit / slowdown threshold (confirmed: HUD moved 35 -> 65). Final = 50 on the player and is
+-- probably the hard cap, so both receive the offset (unconfirmed for Final; verify by carrying > 50 kg).
+local PROPERTY_CANDIDATES = { "InitialOverloadWeight", "FinalOverloadWeight" }
 -- Floats shown by F8 so the Mule skill (+5 kg/level) can be matched to the right field.
 local DIAG_PROPERTIES = {
     "InitialOverloadWeight", "FinalOverloadWeight", "BaseInitialOverloadWeight",
@@ -20,8 +22,7 @@ local DIAG_PROPERTIES = {
 }
 
 local offset = 0.0
-local state = {}      -- [objectKey] = { base = number, written = number }
-local propCache = {}  -- [className] = property name
+local state = {}      -- [objectKey#property] = { base = number, written = number }
 
 local function log(fmt, ...)
     local ok, msg = pcall(string.format, fmt, ...)
@@ -50,20 +51,6 @@ local function writeNumber(obj, prop, value)
     return ok
 end
 
-local function detectProperty(obj, className)
-    local cached = propCache[className]
-    if cached and readNumber(obj, cached) ~= nil then return cached end
-    for _, name in ipairs(PROPERTY_CANDIDATES) do
-        if readNumber(obj, name) ~= nil then
-            propCache[className] = name
-            log("Detected weight property '%s' on %s", name, className)
-            return name
-        end
-    end
-    log("None of the expected properties are readable on %s; run F8", className)
-    return nil
-end
-
 -- NPC/animal/storage inventories share the class; only the player's has PlayerCharacter == true.
 local function isPlayerInventory(obj)
     local ok, v = pcall(function() return obj.PlayerCharacter end)
@@ -88,11 +75,11 @@ end
 local function applyAll(reason)
     local applied = 0
     for _, t in ipairs(collectTargets()) do
-        local prop = detectProperty(t.obj, t.class)
-        if prop then
-            local key = safeName(t.obj)
+        for _, prop in ipairs(PROPERTY_CANDIDATES) do
+            local key = safeName(t.obj) .. "#" .. prop
             local cur = readNumber(t.obj, prop)
-            if cur ~= nil then
+            -- A zero value means the game has not initialised the field yet; never raise it from 0.
+            if cur ~= nil and (cur > 0 or state[key] ~= nil) then
                 local s = state[key]
                 if s == nil or math.abs(cur - s.written) > 0.001 then
                     s = { base = cur, written = cur }
@@ -110,7 +97,7 @@ local function applyAll(reason)
             end
         end
     end
-    if applied > 0 then log("Applied offset %+.1f kg to %d object(s) (%s)", offset, applied, reason) end
+    if applied > 0 then log("Applied offset %+.1f kg to %d value(s) (%s)", offset, applied, reason) end
     return applied
 end
 
@@ -147,7 +134,6 @@ local function dumpDiagnostics()
             end
         end
         if not any then lines[#lines + 1] = "No InventoryComponent_C instances found; load into a save first." end
-        for k, v in pairs(propCache) do lines[#lines + 1] = string.format("cached %s -> %s", k, v) end
         for _, l in ipairs(lines) do log("%s", l) end
         local f = io.open(DUMP_FILE, "w")
         if f then
