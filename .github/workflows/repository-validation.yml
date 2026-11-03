@@ -1,0 +1,23 @@
+name: Repository Validation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required files
+        run: |
+          missing=0
+          for f in README.md LICENSE CHANGELOG.md CONTRIBUTING.md deploy.ps1 \
+                   src/IncrementalWeight/scripts/main.lua src/IncrementalWeight/enabled.txt; do
+            [ -f "$f" ] || { echo "::error::Missing $f"; missing=1; }
+          done
+          exit $missing
+      - name: deploy.ps1 parses
+        shell: pwsh
+        run: |
+          $e = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("deploy.ps1", [ref]$null, [ref]$e)
+          if ($e) { $e; exit 1 }
